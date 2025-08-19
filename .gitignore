@@ -1,0 +1,16 @@
+# Lingkungan Virtual Python
+venv/
+layoutlmv3-base/
+
+# Folder data yang berubah-ubah
+# Kita tidak menyimpan data PDF atau hasil ekstraksi ke Git
+data/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# File spesifik OS/Editor (opsional)
+.vscode/
+.idea/
+.DS_Store

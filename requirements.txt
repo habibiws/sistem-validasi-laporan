@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-multipart
+PyMuPDF
+Pillow
+pytesseract
+torch
+torchvision
+torchaudio
+transformers
+sentencepiece
+numpy
