@@ -19,6 +19,7 @@ from .ekstraksi_pdf import ekstrak_aset_terstruktur, simpan_hasil_ke_disk
 from .validasi_foto import proses_validasi_dengan_petunjuk
 from .konteks_extractor import load_model, analisis_halaman_dengan_layoutlmv3
 from  .validasi_konten import cek_kelengkapan_dokumen
+from .konteks_extractor import load_model, analisis_halaman_dengan_layoutlmv3, visualisasikan_hasil_analisis
 
 # Muat model AI saat startup
 app = FastAPI(
@@ -132,12 +133,25 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(dpi=200)
                 image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
                 hasil_analisis_halaman = analisis_halaman_dengan_layoutlmv3(image)
                 hasil_kontekstual_proyek.append({ "halaman": page_num + 1, "analisis": hasil_analisis_halaman })
-            
+
+                # fitur baru: buat dan simpan gambar visualisasi
+                gambar_visualisasi = visualisasikan_hasil_analisis(image, hasil_analisis_halaman)
+
+                #tentukan path untuk menyimpan gambar debug di dalam folde rhalaman
+                folder_halaman_output = path_proyek_output / f"halaman_{page_num + 1}"
+                folder_halaman_output.mkdir(exist_ok=True)
+
+                nama_file_debug = f"halaman_{page_num + 1}_analisis_visual.png"
+                path_output_debug = folder_halaman_output / nama_file_debug
+
+                gambar_visualisasi.save(path_output_debug)
+
             path_laporan_kontekstual = path_proyek_output / "laporan_kontekstual.json"
             with open(path_laporan_kontekstual, "w", encoding="utf-8") as f: json.dump(hasil_kontekstual_proyek, f, indent=4, ensure_ascii=False)
-            print(f"[Tahap 2/4] Analisis kontekstual selesai.")
+            print(f"[Tahap 2/4] Analisis kontekstual selesai. Visualisasi disimpan")
 
             # Tahap baru validasi kelengkapan dokumen
             print("[Tahap 3/4] Memulai validasi kelengkapan dokumen...")
