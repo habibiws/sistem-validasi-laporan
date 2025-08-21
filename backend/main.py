@@ -18,11 +18,13 @@ from fastapi.responses import JSONResponse
 from .ekstraksi_pdf import ekstrak_aset_terstruktur, simpan_hasil_ke_disk
 from .validasi_foto import proses_validasi_dengan_petunjuk
 from .konteks_extractor import load_model, analisis_halaman_dengan_layoutlmv3
+from  .validasi_konten import cek_kelengkapan_dokumen
 
+# Muat model AI saat startup
 app = FastAPI(
     title="Sistem Validasi Laporan Otomatis",
-    version="2.2.0-final",
-    description="API dengan kemampuan ekstraksi kontekstual menggunakan AI lokal.",
+    version="2.3.0-content-validation",
+    description="API dengan validasi kelengkapan dokumen.",
     on_startup=[load_model]
 )
 
@@ -34,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Pengaturan Path direktori
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 INPUT_PDF_DIR = DATA_DIR / "input_pdf"
@@ -46,6 +49,27 @@ OUTPUT_EKSTRAKSI_DIR.mkdir(parents=True, exist_ok=True)
 SISTEM_VALIDASI_DIR.mkdir(parents=True, exist_ok=True)
 
 EKSTENSI_GAMBAR = ["jpg", "jpeg", "png", "bmp"]
+
+# aturan kelengkapan dokumen
+ATURAN_KELENGKAPAN = {
+    "frasa_wajib": [
+        "DOKUMEN BERITA ACARA UJI TERIMA KESATU",
+        "CHECKLIST VERIFIKASI BA UJI TERIMA",
+        "BERITA ACARA",
+        "LAPORAN",
+        "DAFTAR HADIR UJI TERIMA",
+        "BOQ UJI TERIMA",
+        "DOKUMENTASI UJI TERIMA",
+        "FORM PENGUKURAN OPM",
+        "PENGUKURAN OPM",
+        "PENGUKURAN OTDR",
+        "REPORT OTDR",
+        "DOKUMENTASI  PEKERJAAN",
+        "AS BUILT DRAWING",
+        "LAMPIRAN MANCORE",
+        "LAMPIRAN KML"
+    ]
+}
 
 def buat_id_sesi():
     return datetime.now().strftime("%Y%m%d-%H%M%S") + "_" + str(uuid.uuid4())[:8]
@@ -66,7 +90,7 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
     print(f"Menerima {len(files)} file untuk diproses.")
     print("="*50)
 
-    laporan_sesi_keseluruhan = { "id_sesi": id_sesi, "proyek_yang_diproses": [], "total_gambar_diproses": 0, "total_duplikat_ditemukan": 0, "total_file_unik_baru": 0, "semua_detail_duplikat": [], "semua_error_log": [] }
+    laporan_sesi_keseluruhan = { "id_sesi": id_sesi, "proyek_yang_diproses": [], "hasil_validasi_kelengkapan": [], "total_gambar_diproses": 0, "total_duplikat_ditemukan": 0, "total_file_unik_baru": 0, "semua_detail_duplikat": [], "semua_error_log": [] }
     
     indeks_master = {}
     if PATH_MASTER_INDEX.exists():
@@ -84,21 +108,27 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
             with open(temp_pdf_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
+            laporan_proyek_final = {}
+
+            #tahap 1: ekstraksi aset dasar
+            print("[Tahap 1/4] Memulai ekstraksi aset dasar...")
+            # ... (logika dasar)
             def ekstraksi_progress_reporter(current, total):
-                progress_reporter("Tahap 1/3 - Ekstraksi Dasar", current, total)
+                progress_reporter("Tahap 1/4 - Ekstraksi Dasar", current, total)
             
-            print("[Tahap 1/3] Memulai ekstraksi aset dasar...")
+            print("[Tahap 1/4] Memulai ekstraksi aset dasar...")
             data_mentah = ekstrak_aset_terstruktur(str(temp_pdf_path), progress_callback=ekstraksi_progress_reporter)
             if not data_mentah: raise Exception("Ekstraksi dasar gagal.")
             hasil_ekstraksi = simpan_hasil_ke_disk(data_mentah, str(path_proyek_output))
-            print("[Tahap 1/3] Ekstraksi dasar selesai.")
+            print("[Tahap 1/4] Ekstraksi dasar selesai.")
 
-            print("[Tahap 2/3] Memulai analisis kontekstual per halaman...")
+            # tahap 2: analisis kontekstual AI
+            print("[Tahap 2/4] Memulai analisis kontekstual per halaman...")
             doc = fitz.open(temp_pdf_path)
             hasil_kontekstual_proyek = []
             total_halaman = len(doc)
             for page_num in range(total_halaman):
-                progress_reporter("Tahap 2/3 - Analisis AI", page_num + 1, total_halaman)
+                progress_reporter("Tahap 2/4 - Analisis AI", page_num + 1, total_halaman)
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(dpi=200)
                 image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -107,28 +137,38 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
             
             path_laporan_kontekstual = path_proyek_output / "laporan_kontekstual.json"
             with open(path_laporan_kontekstual, "w", encoding="utf-8") as f: json.dump(hasil_kontekstual_proyek, f, indent=4, ensure_ascii=False)
-            print(f"[Tahap 2/3] Analisis kontekstual selesai.")
+            print(f"[Tahap 2/4] Analisis kontekstual selesai.")
 
-            print("[Tahap 3/3] Memulai validasi duplikasi foto...")
+            # Tahap baru validasi kelengkapan dokumen
+            print("[Tahap 3/4] Memulai validasi kelengkapan dokumen...")
+            hasil_validasi_kelengkapan = cek_kelengkapan_dokumen(hasil_kontekstual_proyek, ATURAN_KELENGKAPAN)
+            laporan_proyek_final["validasi_kelengkapan"] = hasil_validasi_kelengkapan
+            print(f"[Tahap 3/4] Validasi kelengkapan selesai. Status: {hasil_validasi_kelengkapan['status']}")
+
+            # Tahap 4: validasi dupplikasi foto
+            print("[Tahap 4/4] Memulai validasi duplikasi foto...")
             list_gambar_absolut = []
             for ext in EKSTENSI_GAMBAR: list_gambar_absolut.extend(glob.glob(str(path_proyek_output / '**' / f'*.{ext}'), recursive=True))
             print(f"Ditemukan {len(list_gambar_absolut)} gambar untuk divalidasi.")
             
             def validasi_progress_reporter(current, total):
-                progress_reporter("Tahap 3/3 - Validasi Foto", current, total)
+                progress_reporter("Tahap 4/4 - Validasi Foto", current, total)
 
-            laporan_proyek = proses_validasi_dengan_petunjuk( list_gambar_proyek=list_gambar_absolut, indeks_master=indeks_master, nama_proyek=file.filename, path_sesi=str(path_sesi_output), progress_callback=validasi_progress_reporter)
-            print(f"[Tahap 3/3] Validasi selesai. Duplikat: {laporan_proyek.get('duplikat_ditemukan', 0)}")
+            hasil_validasi_foto = proses_validasi_dengan_petunjuk( list_gambar_proyek=list_gambar_absolut, indeks_master=indeks_master, nama_proyek=file.filename, path_sesi=str(path_sesi_output), progress_callback=validasi_progress_reporter)
+            laporan_proyek_final["validasi_duplikasi_foto"] = hasil_validasi_foto
+            print(f"[Tahap 4/4] Validasi selesai. Duplikat: {hasil_validasi_foto.get('duplikat_ditemukan', 0)}")
             
+            # Simpan laporan proyekk gabungan
             path_laporan_proyek = path_proyek_output / "laporan_validasi_proyek.json"
-            with open(path_laporan_proyek, "w", encoding="utf-8") as f: json.dump(laporan_proyek, f, indent=4, ensure_ascii=False)
+            with open(path_laporan_proyek, "w", encoding="utf-8") as f: json.dump(laporan_proyek_final, f, indent=4, ensure_ascii=False)
             
-            laporan_sesi_keseluruhan["proyek_yang_diproses"].append(file.filename)
-            laporan_sesi_keseluruhan["total_gambar_diproses"] += laporan_proyek["jumlah_gambar_diproses"]
-            laporan_sesi_keseluruhan["total_duplikat_ditemukan"] += laporan_proyek["duplikat_ditemukan"]
-            laporan_sesi_keseluruhan["total_file_unik_baru"] += laporan_proyek["file_unik_baru_dicatat"]
-            laporan_sesi_keseluruhan["semua_detail_duplikat"].extend(laporan_proyek["detail_duplikat"])
-            laporan_sesi_keseluruhan["semua_error_log"].extend(laporan_proyek["error_log"])
+            # Akumulasi hasil ke laporan sesi
+            laporan_sesi_keseluruhan["proyek_yang_diproses"].append({"nama_file": file.filename, "status_kelengkapan": hasil_validasi_kelengkapan['status']})
+            laporan_sesi_keseluruhan["total_gambar_diproses"] += hasil_validasi_foto["jumlah_gambar_diproses"]
+            laporan_sesi_keseluruhan["total_duplikat_ditemukan"] += hasil_validasi_foto["duplikat_ditemukan"]
+            laporan_sesi_keseluruhan["total_file_unik_baru"] += hasil_validasi_foto["file_unik_baru_dicatat"]
+            laporan_sesi_keseluruhan["semua_detail_duplikat"].extend(hasil_validasi_foto["detail_duplikat"])
+            laporan_sesi_keseluruhan["semua_error_log"].extend(hasil_validasi_foto["error_log"])
 
         except Exception as e:
             print(f"\n[ERROR] Gagal memproses {file.filename}: {e}")
