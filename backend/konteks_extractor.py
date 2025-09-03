@@ -16,7 +16,7 @@ def load_model():
 
     if MODEL is None:
         # KEMBALI MENGGUNAKAN NAMA MODEL LOKAL ANDA
-        MODEL_NAME = "layoutlmv3-base" 
+        MODEL_NAME = "microsoft/layoutlmv3-base" 
         print(f"Memuat model AI '{MODEL_NAME}' dari folder lokal...")
         
         PROCESSOR = LayoutLMv3Processor.from_pretrained(MODEL_NAME)

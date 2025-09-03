@@ -13,7 +13,7 @@ const progressText = document.getElementById("progressText");
 const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const API_URL = IS_LOCAL 
     ? 'http://localhost:8000' 
-    : 'https://api.domain-anda.com'; // Ganti dengan URL produksi
+    : 'https://supreme-funicular-695xxq7p5g57f5v5x-8000.app.github.dev'; // Ganti dengan URL produksi
 
 // Fungsi untuk menampilkan pesan
 function showMessage(htmlContent, type) {
