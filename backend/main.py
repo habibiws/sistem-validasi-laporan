@@ -1,5 +1,4 @@
 # backend/main.py
-
 import os
 import shutil
 import json
@@ -15,11 +14,13 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .ekstraksi_pdf import ekstrak_aset_terstruktur, simpan_hasil_ke_disk
-from .validasi_foto import proses_validasi_dengan_petunjuk
-from .konteks_extractor import load_model, analisis_halaman_dengan_layoutlmv3
-from  .validasi_konten import cek_kelengkapan_dokumen
-from .konteks_extractor import load_model, analisis_halaman_dengan_layoutlmv3, visualisasikan_hasil_analisis
+# --- PERBAIKAN DI SINI ---
+# Hapus titik (.) dari semua impor lokal
+from ekstraksi_pdf import ekstrak_aset_terstruktur, simpan_hasil_ke_disk
+from validasi_foto import proses_validasi_dengan_petunjuk
+from konteks_extractor import load_model, analisis_halaman_dengan_layoutlmv3, visualisasikan_hasil_analisis
+from validasi_konten import cek_kelengkapan_dokumen
+# --------------------------
 
 # Muat model AI saat startup
 app = FastAPI(
@@ -37,9 +38,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pengaturan Path direktori
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+# Pengaturan Path direktori di dalam kontainer
+# BASE_DIR sekarang adalah /app
+# BASE_DIR = Path(__file__).resolve().parent.parent 
+# Kita akan gunakan path absolut di dalam kontainer
+DATA_DIR = Path("/app/data") # Asumsikan data akan di-mount ke /app/data
+# Jika Anda me-mount 'data' ke root, gunakan Path("/data")
+
+# Sesuaikan path-path ini jika Anda mengubah struktur volume di docker-compose
 INPUT_PDF_DIR = DATA_DIR / "input_pdf"
 OUTPUT_EKSTRAKSI_DIR = DATA_DIR / "output_ekstraksi"
 SISTEM_VALIDASI_DIR = DATA_DIR / "sistem_validasi"
@@ -65,7 +71,7 @@ ATURAN_KELENGKAPAN = {
         "PENGUKURAN OPM",
         "PENGUKURAN OTDR",
         "REPORT OTDR",
-        "DOKUMENTASI  PEKERJAAN",
+        "DOKUMENTASI PEKERJAAN",
         "AS BUILT DRAWING",
         "LAMPIRAN MANCORE",
         "LAMPIRAN KML"
@@ -113,11 +119,9 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
 
             #tahap 1: ekstraksi aset dasar
             print("[Tahap 1/4] Memulai ekstraksi aset dasar...")
-            # ... (logika dasar)
             def ekstraksi_progress_reporter(current, total):
                 progress_reporter("Tahap 1/4 - Ekstraksi Dasar", current, total)
             
-            print("[Tahap 1/4] Memulai ekstraksi aset dasar...")
             data_mentah = ekstrak_aset_terstruktur(str(temp_pdf_path), progress_callback=ekstraksi_progress_reporter)
             if not data_mentah: raise Exception("Ekstraksi dasar gagal.")
             hasil_ekstraksi = simpan_hasil_ke_disk(data_mentah, str(path_proyek_output))
@@ -137,16 +141,11 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
                 hasil_analisis_halaman = analisis_halaman_dengan_layoutlmv3(image)
                 hasil_kontekstual_proyek.append({ "halaman": page_num + 1, "analisis": hasil_analisis_halaman })
 
-                # fitur baru: buat dan simpan gambar visualisasi
                 gambar_visualisasi = visualisasikan_hasil_analisis(image, hasil_analisis_halaman)
-
-                #tentukan path untuk menyimpan gambar debug di dalam folde rhalaman
                 folder_halaman_output = path_proyek_output / f"halaman_{page_num + 1}"
                 folder_halaman_output.mkdir(exist_ok=True)
-
                 nama_file_debug = f"halaman_{page_num + 1}_analisis_visual.png"
                 path_output_debug = folder_halaman_output / nama_file_debug
-
                 gambar_visualisasi.save(path_output_debug)
 
             path_laporan_kontekstual = path_proyek_output / "laporan_kontekstual.json"
@@ -172,11 +171,9 @@ async def upload_and_validate_multiple_pdfs(files: List[UploadFile] = File(...))
             laporan_proyek_final["validasi_duplikasi_foto"] = hasil_validasi_foto
             print(f"[Tahap 4/4] Validasi selesai. Duplikat: {hasil_validasi_foto.get('duplikat_ditemukan', 0)}")
             
-            # Simpan laporan proyekk gabungan
             path_laporan_proyek = path_proyek_output / "laporan_validasi_proyek.json"
             with open(path_laporan_proyek, "w", encoding="utf-8") as f: json.dump(laporan_proyek_final, f, indent=4, ensure_ascii=False)
             
-            # Akumulasi hasil ke laporan sesi
             laporan_sesi_keseluruhan["proyek_yang_diproses"].append({"nama_file": file.filename, "status_kelengkapan": hasil_validasi_kelengkapan['status']})
             laporan_sesi_keseluruhan["total_gambar_diproses"] += hasil_validasi_foto["jumlah_gambar_diproses"]
             laporan_sesi_keseluruhan["total_duplikat_ditemukan"] += hasil_validasi_foto["duplikat_ditemukan"]

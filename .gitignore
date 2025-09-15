@@ -1,16 +1,20 @@
-# Lingkungan Virtual Python
-venv/
-layoutlmv3-base/
-
-# Folder data yang berubah-ubah
-# Kita tidak menyimpan data PDF atau hasil ekstraksi ke Git
-data/
-
-# Cache Python
+# Lingkungan Python
+/.venv
+/venv
+backend/__pycache__
 __pycache__/
 *.pyc
 
-# File spesifik OS/Editor (opsional)
-.vscode/
-.idea/
+# Data & Model (JANGAN PERNAH DI-PUSH)
+/models/
+/data_preparation/
+/data/
+/training_output/
+backend/data
+
+# File temporary dari Label Studio atau skrip lain
+*.json
+
+# File spesifik sistem operasi
 .DS_Store
+Thumbs.db

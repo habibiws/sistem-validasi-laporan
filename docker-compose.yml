@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./models:/app/models # Hubungkan folder model agar bisa diakses
+      - ./data:/app/data # Hubungkan folder data agar bisa diakses
+    # Tambahkan healthcheck jika perlu
+    environment:
+      - TZ=Asia/Jakarta
+  
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

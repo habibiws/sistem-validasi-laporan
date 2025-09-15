@@ -1,106 +1,97 @@
 # backend/konteks_extractor.py
-
 from PIL import Image, ImageDraw, ImageFont
 from transformers import LayoutLMv3Processor, LayoutLMv3ForTokenClassification
 import torch
 
-# Variabel global untuk menampung model dan prosesor yang sudah dimuat
 MODEL = None
 PROCESSOR = None
 
 def load_model():
-    """
-    Memuat model LayoutLMv3 dan prosesor ke dalam variabel global.
-    """
     global MODEL, PROCESSOR
-
     if MODEL is None:
-        # KEMBALI MENGGUNAKAN NAMA MODEL LOKAL ANDA
-        MODEL_NAME = "layoutlmv3-base" 
+        MODEL_NAME = "/app/models/layoutlmv3-finetuned-laporan-64%209-data-100e"
         print(f"Memuat model AI '{MODEL_NAME}' dari folder lokal...")
-        
-        PROCESSOR = LayoutLMv3Processor.from_pretrained(MODEL_NAME)
+        PROCESSOR = LayoutLMv3Processor.from_pretrained(MODEL_NAME, apply_ocr=True)
         MODEL = LayoutLMv3ForTokenClassification.from_pretrained(MODEL_NAME)
-        
         print("Model AI berhasil dimuat dan siap digunakan.")
 
+# Ganti fungsi ini di backend/konteks_extractor.py
 
 def analisis_halaman_dengan_layoutlmv3(image: Image.Image) -> dict:
-    """
-    Menganalisis satu gambar halaman menggunakan model LayoutLMv3 yang sudah dimuat.
-    """
     global MODEL, PROCESSOR
+    if MODEL is None or PROCESSOR is None: raise RuntimeError("Model belum dimuat.")
 
-    if MODEL is None or PROCESSOR is None:
-        raise RuntimeError("Model belum dimuat. Jalankan load_model() terlebih dahulu.")
-
-    # Menambahkan truncation=True untuk menangani halaman dengan teks yang sangat panjang
-    encoding = PROCESSOR(image, truncation=True, return_tensors="pt")
+    print("   - Menerapkan strategi 'Sliding Window' untuk ekstraksi komprehensif...")
+    
+    encoding = PROCESSOR(
+        image,
+        truncation=True,
+        padding="max_length",
+        max_length=512,
+        return_overflowing_tokens=True,
+        stride=128,
+        return_tensors="pt"
+    )
+    
+    encoding.pop('overflow_to_sample_mapping', None)
+    
+    all_tokens = []
+    
+    # --- PERBAIKAN UTAMA ADA DI SINI ---
+    # Ekstrak tensor pixel_values dari dalam list
+    pixel_values = encoding.pixel_values[0] 
+    num_batches = len(encoding.input_ids)
     
     with torch.no_grad():
-        outputs = MODEL(**encoding)
+        for i in range(num_batches):
+            # Gunakan pixel_values yang sama untuk setiap batch teks
+            batch_input = {
+                "input_ids": encoding.input_ids[i].unsqueeze(0),
+                "attention_mask": encoding.attention_mask[i].unsqueeze(0),
+                "bbox": encoding.bbox[i].unsqueeze(0),
+                "pixel_values": pixel_values.unsqueeze(0), # <-- Pastikan ada batch dimension
+            }
+            
+            outputs = MODEL(**batch_input)
 
-    predictions = outputs.logits.argmax(-1).squeeze().tolist()
-    tokens = PROCESSOR.tokenizer.convert_ids_to_tokens(encoding.input_ids.squeeze().tolist())
-    boxes = encoding.bbox.squeeze().tolist()
+            predictions = outputs.logits.argmax(-1).squeeze().tolist()
+            token_ids = batch_input["input_ids"].squeeze().tolist()
+            boxes = batch_input["bbox"].squeeze().tolist()
+            tokens_text = PROCESSOR.tokenizer.convert_ids_to_tokens(token_ids)
 
-    parsed_results = []
-    for token, box, pred_id in zip(tokens, boxes, predictions):
-        if token in ["[CLS]", "[SEP]", "[PAD]"]:
-            continue
-        
-        parsed_results.append({
-            "token": token,
-            "label": MODEL.config.id2label[pred_id],
-            "box": box
-        })
+            for token, box, pred_id in zip(tokens_text, boxes, predictions):
+                if token in [PROCESSOR.tokenizer.cls_token, PROCESSOR.tokenizer.sep_token, PROCESSOR.tokenizer.pad_token]:
+                    continue
+                all_tokens.append({
+                    "token": token,
+                    "label": MODEL.config.id2label[pred_id],
+                    "box": [int(coord) for coord in box]
+                })
 
-    return {"hasil_analisis_kontekstual": parsed_results}
-
-
-def visualisasikan_hasil_analisis(image: Image.Image, hasil_analisis: dict) -> Image.Image:
-    """
-    Menggambar bounding box dan label, dengan penyesuaian skala koordinat yang benar.
-    """
-    img_visual = image.copy()
-    draw = ImageDraw.Draw(img_visual)
-    width, height = img_visual.size
-
-    def unnormalize_box(box, width, height):
-        """Mengubah skala koordinat dari 0-1000 ke dimensi piksel gambar."""
-        return [
-            int(box[0] / 1000.0 * width),
-            int(box[1] / 1000.0 * height),
-            int(box[2] / 1000.0 * width),
-            int(box[3] / 1000.0 * height),
-        ]
-
-    label_colors = {
-        "QUESTION": "blue",
-        "ANSWER": "green",
-        "HEADER": "orange",
-        "DEFAULT": "red"
-    }
+    # Hapus duplikat yang mungkin muncul di area tumpang tindih
+    unique_tokens = []
+    seen_tokens = set()
+    for token in all_tokens:
+        token_id = (token['token'], tuple(token['box']))
+        if token_id not in seen_tokens:
+            unique_tokens.append(token)
+            seen_tokens.add(token_id)
     
-    try:
-        font = ImageFont.truetype("arial.ttf", 15)
-    except IOError:
-        font = ImageFont.load_default()
+    print(f"   - Ekstraksi selesai, total {len(unique_tokens)} token unik berhasil diekstrak.")
+    return {"hasil_analisis_kontekstual": unique_tokens}
 
+# Fungsi visualisasi tidak diubah
+def visualisasikan_hasil_analisis(image: Image.Image, hasil_analisis: dict) -> Image.Image:
+    img_visual = image.copy(); draw = ImageDraw.Draw(img_visual); width, height = img_visual.size
+    def unnormalize_box(box, width, height): return [int(box[0]/1000*width), int(box[1]/1000*height), int(box[2]/1000*width), int(box[3]/1000*height)]
+    label_colors = {"KEY":"blue", "VALUE":"green", "OTHER":"red", "DEFAULT":"red"}
+    try: font = ImageFont.truetype("arial.ttf", 15)
+    except IOError: font = ImageFont.load_default()
     data_analisis = hasil_analisis.get("hasil_analisis_kontekstual", [])
-
     for item in data_analisis:
-        normalized_box = item["box"]
-        label = item["label"]
-        
-        pixel_box = unnormalize_box(normalized_box, width, height)
-        
-        color = label_colors.get(label, label_colors["DEFAULT"])
-        
+        pixel_box = unnormalize_box(item["box"], width, height); label = item["label"]; color = label_colors.get(str(label), label_colors["DEFAULT"])
         draw.rectangle(pixel_box, outline=color, width=2)
-        
-        text_position = (pixel_box[0] + 5, pixel_box[1] - 15)
-        draw.rectangle([text_position, (text_position[0] + len(label) * 8, text_position[1] + 15)], fill="white")
-        draw.text(text_position, label, fill=color, font=font)
-        
+        text_position = (pixel_box[0]+5, pixel_box[1]-15)
+        if text_position[1] < 0: text_position = (pixel_box[0]+5, pixel_box[1]+5)
+        draw.text(text_position, str(label), fill=color, font=font)
     return img_visual
