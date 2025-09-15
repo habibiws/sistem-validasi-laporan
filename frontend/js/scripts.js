@@ -13,7 +13,7 @@ const progressText = document.getElementById("progressText");
 const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const API_URL = IS_LOCAL 
     ? 'http://localhost:8000' 
-    : 'https://api.domain-anda.com'; // Ganti dengan URL produksi
+    : 'https://api-domain-anda.com'; // Ganti dengan URL produksi
 
 // Fungsi untuk menampilkan pesan
 function showMessage(htmlContent, type) {
@@ -30,7 +30,7 @@ function validateFile(files) {
     if (files.length === 0) return "Silakan pilih file terlebih dahulu";
     for (const file of files) {
         if (!file.name.toLowerCase().endsWith(".pdf")) return `File '${file.name}' bukan PDF.`;
-        if (file.size > 200 * 1024 * 1024) return `Ukuran file '${file.name}' terlalu besar.`;
+        if (file.size > 200 * 1024 * 1024) return `Ukuran file '${file.name}' terlalu besar  (Maks 200MB).`;
     }
     return null;
 }
